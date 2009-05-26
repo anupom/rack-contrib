@@ -29,8 +29,8 @@ module Rack
   #     will serve all requests beginning with /images, /csss or /js from the
   #     directory "statics/images",  "statics/css",  "statics/js".
   #     All the files from these directories will have modified headers to enable client/proxy caching,
-  #     except the files from the directory "documents". Append a * (start) at the end of the directory name
-  #     if you want to disable caching for that directory . In that case, plain static contents will be served with
+  #     except the files from the directory "documents". Append a * (star) at the end of the pattern
+  #     if you want to disable caching for any pattern . In that case, plain static contents will be served with
   #     default headers.
   #
   #     use Rack::StaticCache, :urls => ["/images"], :duration => 2, :versioning => false
@@ -46,6 +46,14 @@ module Rack
     def initialize(app, options={})
       @app = app
       @urls = options[:urls]
+      @no_cache = {}
+      @urls.collect! do |url|
+        if url  =~ /\*$/
+          url.sub!(/\*$/, '')
+          @no_cache[url] = 1
+        end
+        url
+      end
       root = options[:root] || Dir.pwd
       @file_server = Rack::File.new(root)
       @cache_duration = options[:duration] || 1
@@ -57,17 +65,17 @@ module Rack
 
     def call(env)
       path = env["PATH_INFO"]
-      if @urls.any? { |url| path.index(url) == 0 }
-        path.sub!(/-[\d.]+([.][a-zA-Z][\w]+)$/, '\1') if @versioning_enabled
-
+      url = @urls.detect{ |u| path.index(u) == 0 }
+      unless url.nil?
+        path.sub!(/-[\d.]+([.][a-zA-Z][\w]+)?$/, '\1') if @versioning_enabled
         status, headers, body = @file_server.call(env)
-
-        headers['Cache-Control'] ="max-age=#{@duration_in_seconds}, public"
-        headers['Expires'] = @duration_in_words
-        headers.delete 'Etag'
-        headers.delete 'Pragma'
-        headers.delete 'Last-Modified'
-
+        if @no_cache[url].nil?
+          headers['Cache-Control'] ="max-age=#{@duration_in_seconds}, public"
+          headers['Expires'] = @duration_in_words
+          headers.delete 'Etag'
+          headers.delete 'Pragma'
+          headers.delete 'Last-Modified'
+        end
         [status, headers, body]
       else
         @app.call(env)
